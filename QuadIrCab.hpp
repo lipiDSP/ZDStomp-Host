@@ -154,15 +154,17 @@ private:
             }
         }
         if (!anyActive) return;
-        float bufRe[kFftSize]{}, bufIm[kFftSize]{};
-        for (int i = 0; i < nFrames; ++i) bufRe[i] = 0.5f * (left[i] + right[i]);
-        fftDifForward(bufRe, bufIm);
+        float bufLRe[kFftSize]{}, bufLIm[kFftSize]{};
+        float bufRRe[kFftSize]{}, bufRIm[kFftSize]{};
+        for (int i = 0; i < nFrames; ++i) { bufLRe[i] = left[i]; bufRRe[i] = right[i]; }
+        fftDifForward(bufLRe, bufLIm);
+        fftDifForward(bufRRe, bufRIm);
         float specLRe[kFftSize], specLIm[kFftSize], specRRe[kFftSize], specRIm[kFftSize];
         for (int i = 0; i < kFftSize; ++i) {
-            specLRe[i] = bufRe[i] * combLRe[i] - bufIm[i] * combLIm[i];
-            specLIm[i] = bufRe[i] * combLIm[i] + bufIm[i] * combLRe[i];
-            specRRe[i] = bufRe[i] * combRRe[i] - bufIm[i] * combRIm[i];
-            specRIm[i] = bufRe[i] * combRIm[i] + bufIm[i] * combRRe[i];
+            specLRe[i] = bufLRe[i] * combLRe[i] - bufLIm[i] * combLIm[i];
+            specLIm[i] = bufLRe[i] * combLIm[i] + bufLIm[i] * combLRe[i];
+            specRRe[i] = bufRRe[i] * combRRe[i] - bufRIm[i] * combRIm[i];
+            specRIm[i] = bufRRe[i] * combRIm[i] + bufRIm[i] * combRRe[i];
         }
         fftDitInverse(specLRe, specLIm);
         fftDitInverse(specRRe, specRIm);
@@ -289,7 +291,7 @@ private:
         const uint64_t fix = (1ULL << 32); const double norm = 1.0 / (1ULL << 32);
         uint64_t step = static_cast<uint64_t>(stepD * fix + 0.5), cur = 0;
         for (uint64_t i = 0; i < outSz; ++i) {
-            uint64_t idx = (cur >> 32);
+            (void)cur;
             float s0 = in[0];
             float s1 = (inSz > 1) ? in[1] : s0;
             *out++ = static_cast<float>(s0 + (s1 - s0) * ((cur & (fix - 1)) * norm));

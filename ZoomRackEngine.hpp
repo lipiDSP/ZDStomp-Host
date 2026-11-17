@@ -76,7 +76,8 @@ public:
                           ename.find("CE-") != std::string::npos ||
                           ename.find("CLONE") != std::string::npos);
 
-        fHasDelayReverb = (ename.find("DELAY") != std::string::npos ||
+        fHasDelay = (ename.find("DELAY") != std::string::npos || ename.find("ECHO") != std::string::npos || ename.find("TAPE") != std::string::npos);
+        fHasReverb = (ename.find("CHAMB") != std::string::npos || ename.find("CHURCH") != std::string::npos || ename.find("ARENA") != std::string::npos || ename.find("CAVE") != std::string::npos || ename.find("AIR") != std::string::npos || ename.find("EARLY") != std::string::npos || ename.find("TILED") != std::string::npos || ename.find("MODRV") != std::string::npos || ename.find("SPACE") != std::string::npos ||
                            ename.find("ECHO") != std::string::npos ||
                            ename.find("REV") != std::string::npos ||
                            ename.find("HALL") != std::string::npos ||
@@ -100,12 +101,12 @@ public:
             if (pname.find("TIME") != std::string::npos || pname.find("DECAY") != std::string::npos ||
                 pname.find("F.B") != std::string::npos || pname.find("FB") != std::string::npos ||
                 pname.find("DWELL") != std::string::npos) {
-                fHasDelayReverb = true;
+                if (pname.find("DECAY")!=std::string::npos || pname.find("DWELL")!=std::string::npos || pname.find("PREDLY")!=std::string::npos) fHasReverb = true; else if (!fHasReverb) fHasDelay = true;
             }
         }
 
         // Ha egyik kategóriába sem esett bele, alapból enyhe karakter + szűrő + moduláció engedélyezve
-        if (!fHasAmpOrDrive && !fHasModulation && !fHasDelayReverb) {
+        if (!fHasAmpOrDrive && !fHasModulation && !fHasDelay && !fHasReverb) {
             fHasAmpOrDrive = true;
         }
     }
@@ -118,6 +119,8 @@ public:
     void reset() override {
         std::fill(std::begin(fDelayL), std::end(fDelayL), 0.0f);
         std::fill(std::begin(fDelayR), std::end(fDelayR), 0.0f);
+        for(int c=0;c<4;++c){std::fill(std::begin(fRevCombL[c]),std::end(fRevCombL[c]),0.0f);std::fill(std::begin(fRevCombR[c]),std::end(fRevCombR[c]),0.0f);fRevCombPosL[c]=fRevCombPosR[c]=0;fRevCombLpL[c]=fRevCombLpR[c]=0.0f;}
+        for(int a=0;a<2;++a){std::fill(std::begin(fRevApL[a]),std::end(fRevApL[a]),0.0f);std::fill(std::begin(fRevApR[a]),std::end(fRevApR[a]),0.0f);fRevApPosL[a]=fRevApPosR[a]=0;}
         fWritePos = 0;
         fLfoPhase = 0.0f;
         for (int c = 0; c < 2; ++c) {
@@ -151,6 +154,14 @@ public:
 
         const float echoSamples = (0.04f + fDelayTime * 0.55f) * fSr;
         const float feedback = clampVal(fDelayFb * 0.78f, 0.0f, 0.85f);
+        const float revFb = clampVal(0.68f + fReverbDecay * 0.27f, 0.60f, 0.96f);
+        const float revDamp = clampVal(0.18f + (1.0f - fTone) * 0.55f, 0.10f, 0.75f);
+        const float preDlySamples = (0.002f + fPreDelay * 0.075f) * fSr;
+        const float srScale = fSr / 44100.0f;
+        const int combLenL[4] = { std::max(64, std::min(2040, (int)(1116*srScale))), std::max(64, std::min(2040, (int)(1188*srScale))), std::max(64, std::min(2040, (int)(1277*srScale))), std::max(64, std::min(2040, (int)(1356*srScale))) };
+        const int combLenR[4] = { std::max(64, std::min(2040, (int)(1139*srScale))), std::max(64, std::min(2040, (int)(1211*srScale))), std::max(64, std::min(2040, (int)(1300*srScale))), std::max(64, std::min(2040, (int)(1379*srScale))) };
+        const int apLenL[2] = { std::max(32, std::min(600, (int)(556*srScale))), std::max(32, std::min(600, (int)(441*srScale))) };
+        const int apLenR[2] = { std::max(32, std::min(600, (int)(579*srScale))), std::max(32, std::min(600, (int)(464*srScale))) };
         const float outGain = fLevel * 1.8f;
 
         for (int i = 0; i < frames; ++i) {
@@ -207,8 +218,8 @@ public:
             float delayedL = readInterp(fDelayL, fWritePos - echoSamples);
             float delayedR = readInterp(fDelayR, fWritePos - echoSamples * 1.07f);
 
-            fDelayL[fWritePos] = sigL + (fHasDelayReverb ? delayedR * feedback : 0.0f);
-            fDelayR[fWritePos] = sigR + (fHasDelayReverb ? delayedL * feedback : 0.0f);
+            fDelayL[fWritePos] = sigL + (fHasDelay ? delayedR * feedback : 0.0f);
+            fDelayR[fWritePos] = sigR + (fHasDelay ? delayedL * feedback : 0.0f);
 
             if (fHasModulation && fModDepth > 0.01f) {
                 float modL = readInterp(fDelayL, fWritePos - (modDelayBase + lfoL * modDelaySwing));
@@ -219,9 +230,32 @@ public:
                 sigR = (sigR * (1.0f - fModDepth * 0.6f) + modR * (fModDepth * 0.6f)) * trem;
             }
 
-            if (fHasDelayReverb) {
-                sigL = sigL * (1.0f - fWetMix * 0.5f) + delayedL * (fWetMix * 0.7f);
-                sigR = sigR * (1.0f - fWetMix * 0.5f) + delayedR * (fWetMix * 0.7f);
+            if (fHasDelay) {
+                sigL = sigL * (1.0f - fWetMix * 0.45f) + delayedL * (fWetMix * 0.75f);
+                sigR = sigR * (1.0f - fWetMix * 0.45f) + delayedR * (fWetMix * 0.75f);
+            }
+            if (fHasReverb) {
+                float revInL = readInterp(fDelayL, fWritePos - preDlySamples) * 0.25f;
+                float revInR = readInterp(fDelayR, fWritePos - preDlySamples) * 0.25f;
+                float sumL = 0.0f, sumR = 0.0f;
+                for (int c = 0; c < 4; ++c) {
+                    float oL = fRevCombL[c][fRevCombPosL[c]], oR = fRevCombR[c][fRevCombPosR[c]];
+                    fRevCombLpL[c] = oL * (1.0f - revDamp) + fRevCombLpL[c] * revDamp;
+                    fRevCombLpR[c] = oR * (1.0f - revDamp) + fRevCombLpR[c] * revDamp;
+                    fRevCombL[c][fRevCombPosL[c]] = revInL + fRevCombLpL[c] * revFb;
+                    fRevCombR[c][fRevCombPosR[c]] = revInR + fRevCombLpR[c] * revFb;
+                    if (++fRevCombPosL[c] >= combLenL[c]) fRevCombPosL[c] = 0;
+                    if (++fRevCombPosR[c] >= combLenR[c]) fRevCombPosR[c] = 0;
+                    sumL += oL; sumR += oR;
+                }
+                for (int a = 0; a < 2; ++a) {
+                    float bL = fRevApL[a][fRevApPosL[a]], iL = sumL; sumL = -iL * 0.5f + bL; fRevApL[a][fRevApPosL[a]] = iL + bL * 0.5f;
+                    if (++fRevApPosL[a] >= apLenL[a]) fRevApPosL[a] = 0;
+                    float bR = fRevApR[a][fRevApPosR[a]], iR = sumR; sumR = -iR * 0.5f + bR; fRevApR[a][fRevApPosR[a]] = iR + bR * 0.5f;
+                    if (++fRevApPosR[a] >= apLenR[a]) fRevApPosR[a] = 0;
+                }
+                sigL = sigL * (1.0f - fWetMix * 0.45f) + (sumL * 0.85f + sumR * 0.15f) * (fWetMix * 0.85f);
+                sigR = sigR * (1.0f - fWetMix * 0.45f) + (sumR * 0.85f + sumL * 0.15f) * (fWetMix * 0.85f);
             }
 
             chans[0][i] = clampVal(sigL * outGain, -1.5f, 1.5f);
@@ -243,7 +277,7 @@ private:
         fTreble    = 0.5f;
         fModDepth  = fHasModulation ? 0.45f : 0.0f;
         fModRate   = 0.4f;
-        fDelayTime = 0.35f;
+        fDelayTime = 0.35f; fReverbDecay = 0.55f; fPreDelay = 0.15f;
         fDelayFb   = 0.35f;
         fWetMix    = 0.5f;
 
@@ -283,7 +317,7 @@ private:
                 fHasModulation = true;
             } else if (p.find("TIME") != std::string::npos || p.find("DECAY") != std::string::npos ||
                        p.find("SIZE") != std::string::npos || p.find("PREDLY") != std::string::npos) {
-                fDelayTime = v;
+                if (p.find("PREDLY")!=std::string::npos) { fPreDelay = v; fHasReverb = true; } else if (fHasReverb || p.find("DECAY")!=std::string::npos || p.find("SIZE")!=std::string::npos) { fReverbDecay = v; fHasReverb = true; } else { fDelayTime = v; }
             } else if (p.find("F.B") != std::string::npos || p.find("FB") != std::string::npos ||
                        p.find("FEED") != std::string::npos || p.find("TAIL") != std::string::npos) {
                 fDelayFb = v;
@@ -306,9 +340,14 @@ private:
     std::array<float, 12> fNormParams{};
     float fSr = 44100.0f;
 
-    bool fHasAmpOrDrive = true;
+    bool fHasAmpOrDrive = false;
     bool fHasModulation = false;
-    bool fHasDelayReverb = false;
+    bool fHasDelay = false;
+    bool fHasReverb = false;
+    float fReverbDecay = 0.55f, fPreDelay = 0.15f;
+    float fRevCombL[4][2048]{}, fRevCombR[4][2048]{}, fRevCombLpL[4]{}, fRevCombLpR[4]{};
+    int fRevCombPosL[4]{}, fRevCombPosR[4]{}, fRevApPosL[2]{}, fRevApPosR[2]{};
+    float fRevApL[2][640]{}, fRevApR[2][640]{};
 
     float fDrive = 0.5f, fTube = 0.4f, fLevel = 0.7f, fTone = 0.65f;
     float fBass = 0.5f, fMid = 0.5f, fTreble = 0.5f;

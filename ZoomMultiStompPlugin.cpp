@@ -401,9 +401,18 @@ protected:
         const int tunerMode = static_cast<int>(std::round(fParamValues[kParamTunerActive]));
         const bool tunerOn  = (tunerMode >= 1);
         const bool tunerMute = (tunerMode == 1);
+        float maxL = 0.0f, maxR = 0.0f;
         for (uint32_t i = 0; i < frames; ++i) {
-            float sL = inL[i] * inGain;
-            float sR = inR[i] * inGain;
+            if (std::fabs(inL[i]) > maxL) maxL = std::fabs(inL[i]);
+            if (std::fabs(inR[i]) > maxR) maxR = std::fabs(inR[i]);
+        }
+        const bool copyLtoR = (maxR < 1e-5f && maxL >= 1e-5f);
+        const bool copyRtoL = (maxL < 1e-5f && maxR >= 1e-5f);
+        for (uint32_t i = 0; i < frames; ++i) {
+            float rawL = copyRtoL ? inR[i] : inL[i];
+            float rawR = copyLtoR ? inL[i] : inR[i];
+            float sL = rawL * inGain;
+            float sR = rawR * inGain;
             outL[i] = sL;
             outR[i] = sR;
             if (tunerOn) {

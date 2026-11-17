@@ -1,0 +1,22 @@
+# Build és kimeneti mappák
+bin/
+build/
+*.o
+*.d
+*.a
+*.dll
+*.exe
+*.so
+*.dylib
+*.vst3
+*.lv2
+*.clap
+
+# OS és IDE specifikus fájlok
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Egyéni teszt presetek
+Presets/
+*.zrig

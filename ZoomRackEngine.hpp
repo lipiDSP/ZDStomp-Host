@@ -1,3 +1,4 @@
+#include <fstream>
 #pragma once
 #include "ZDLparser.hpp"
 #include "QuadIrCab.hpp"
@@ -66,6 +67,8 @@ public:
                           ename.find("DZ ") != std::string::npos ||
                           ename.find("MATCH") != std::string::npos ||
                           ename.find("HW ") != std::string::npos);
+        fIsHiGain = (ename.find("7TH") != std::string::npos || ename.find("HEAVEN") != std::string::npos || ename.find("RECT") != std::string::npos || ename.find("DZ") != std::string::npos || ename.find("ALIEN") != std::string::npos || ename.find("REVO") != std::string::npos || ename.find("METAL") != std::string::npos || ename.find("5150") != std::string::npos || ename.find("BG ") != std::string::npos || ename.find("MS ") != std::string::npos || ename.find("KRANK") != std::string::npos || ename.find("ENGL") != std::string::npos || ename.find("KRAMP") != std::string::npos || ename.find("XTC") != std::string::npos || ename.find("BOG") != std::string::npos || ename.find("TREAD") != std::string::npos);
+        fHasGate = (ename.find("ZNR") != std::string::npos || ename.find("GATE") != std::string::npos || ename.find("NOISE") != std::string::npos);
 
         fHasModulation = (ename.find("VIBR") != std::string::npos ||
                           ename.find("CHOR") != std::string::npos ||
@@ -106,9 +109,7 @@ public:
         }
 
         // Ha egyik kategóriába sem esett bele, alapból enyhe karakter + szűrő + moduláció engedélyezve
-        if (!fHasAmpOrDrive && !fHasModulation && !fHasDelay && !fHasReverb) {
-            fHasAmpOrDrive = true;
-        }
+        // Auto-Drive fallback kikapcsolva a tiszta effektek (ZNR/EQ) miatt
     }
 
     void prepare(double sr) override {
@@ -174,14 +175,32 @@ public:
                 const float dry = chans[c][i];
                 float x = dry;
 
+                // 0. Noise Gate (ZNR)
+                if (fHasGate) {
+                    float thresh = fGateThresh * fGateThresh * 0.22f;
+                    // fast release
+                    float envIn = std::fabs(x);
+                    fGateEnv[c] = std::max(envIn, fGateEnv[c] * 0.999f);
+                    if (fGateEnv[c] < thresh) { float fade = fGateEnv[c] / thresh; x *= fade * fade * fade; }
+                }
+
                 // 1. Erősítő / Csöves telítés / Drive szekció
                 if (fHasAmpOrDrive) {
-                    x *= preGain;
-                    // Aszimmetrikus csöves karakterisztika (Tube + Gain)
-                    float biased = x + asymBias;
-                    x = std::tanh(biased * (1.0f + fTube * 1.2f)) - std::tanh(asymBias);
-                    if (fDrive > 0.35f) {
-                        x = std::atan(x * (1.2f + fDrive * 2.0f)) * (2.0f / static_cast<float>(M_PI));
+                    if (fIsHiGain) {
+                        x *= (preGain * 6.5f); // Hi-Gain belső boost
+                        float hpf = x - fEnv[c]; // Bass-cut a feszességhez
+                        fEnv[c] += 0.18f * hpf;
+                        x = hpf;
+                        x = std::tanh(x * 2.5f); // 1. fokozat
+                        x = std::tanh(x * (1.0f + fDrive * 6.0f)); // 2. fokozat
+                        x = std::atan(x * (1.5f + fDrive * 3.0f)) * 0.6366f; // 3. fokozat
+                    } else {
+                        x *= preGain;
+                        float biased = x + asymBias;
+                        x = std::tanh(biased * (1.0f + fTube * 1.2f)) - std::tanh(asymBias);
+                        if (fDrive > 0.35f) {
+                            x = std::atan(x * (1.2f + fDrive * 2.0f)) * (2.0f / 3.14159f);
+                        }
                     }
                 }
 
@@ -277,11 +296,21 @@ private:
         fTreble    = 0.5f;
         fModDepth  = fHasModulation ? 0.45f : 0.0f;
         fModRate   = 0.4f;
+        if (fHasGate) fGateThresh = fNormParams[0];
         fDelayTime = 0.35f; fReverbDecay = 0.55f; fPreDelay = 0.15f;
         fDelayFb   = 0.35f;
         fWetMix    = 0.5f;
 
         for (size_t i = 0; i < fMeta.parameters.size() && i < 12; ++i) {
+            std::string dynName = fMeta.parameters[i].name;
+            for(auto &c : dynName) c = toupper(c);
+            if (fHasGate) {
+                fHasModulation = false; fHasDelay = false; fHasReverb = false; fHasAmpOrDrive = false;
+                if (dynName.find("THR") != std::string::npos) fGateThresh = fNormParams[i];
+                if (dynName.find("DEC") != std::string::npos || dynName.find("REL") != std::string::npos) fGateDecay = fNormParams[i];
+                continue; // Ha ez egy Gate, a ciklus itt megall, a 'Depth' hiba nem tud lefutni!
+            }
+
             std::string p = toUpperStr(fMeta.parameters[i].name);
             float v = fNormParams[i];
 
@@ -293,7 +322,7 @@ private:
                        p.find("CHAR") != std::string::npos || p.find("BODY") != std::string::npos) {
                 fTube = v;
             } else if (p.find("LEVEL") != std::string::npos || p.find("VOL") != std::string::npos ||
-                       p.find("OUT") != std::string::npos) {
+                       false) {
                 fLevel = v;
             } else if (p.find("TONE") != std::string::npos || p.find("PRES") != std::string::npos ||
                        p.find("CUT") != std::string::npos || p.find("HI-DMP") != std::string::npos) {
@@ -344,6 +373,8 @@ private:
     bool fHasModulation = false;
     bool fHasDelay = false;
     bool fHasReverb = false;
+    bool fHasGate = false;
+    bool fIsHiGain = false;
     float fReverbDecay = 0.55f, fPreDelay = 0.15f;
     float fRevCombL[4][2048]{}, fRevCombR[4][2048]{}, fRevCombLpL[4]{}, fRevCombLpR[4]{};
     int fRevCombPosL[4]{}, fRevCombPosR[4]{}, fRevApPosL[2]{}, fRevApPosR[2]{};
@@ -352,6 +383,7 @@ private:
     float fDrive = 0.5f, fTube = 0.4f, fLevel = 0.7f, fTone = 0.65f;
     float fBass = 0.5f, fMid = 0.5f, fTreble = 0.5f;
     float fModDepth = 0.0f, fModRate = 0.4f;
+    float fGateThresh = 0.0f, fGateDecay = 0.5f, fGateEnv[2]{};
     float fDelayTime = 0.3f, fDelayFb = 0.3f, fWetMix = 0.5f;
 
     float fDelayL[kDelayBufSize]{}, fDelayR[kDelayBufSize]{};

@@ -1,0 +1,54 @@
+name: macOS Build (VST3 & AU)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    name: Build macOS Universal (VST3 & AU)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Clone DISTRHO Plugin Framework (DPF)
+        run: |
+          git clone --depth 1 --recursive https://github.com/DISTRHO/DPF.git ../DPF
+
+      - name: Build VST3 and AU (Universal arm64 + x86_64)
+        run: |
+          make -j"$(sysctl -n hw.ncpu)" \
+            DPF_PATH=../DPF \
+            CFLAGS="-arch x86_64 -arch arm64 -mmacosx-version-min=11.0" \
+            CXXFLAGS="-arch x86_64 -arch arm64 -mmacosx-version-min=11.0" \
+            PKG_CONFIG=/usr/bin/false \
+            PKG_CONFIG_PATH=/NOT \
+            vst3 au
+
+      - name: Ad-hoc codesign & verify bundles
+        run: |
+          codesign --force --deep --sign - bin/ZDStompHost.vst3
+          codesign --force --deep --sign - bin/ZDStompHost.component
+          plutil -lint bin/ZDStompHost.vst3/Contents/Info.plist
+          plutil -lint bin/ZDStompHost.component/Contents/Info.plist
+          lipo -info bin/ZDStompHost.vst3/Contents/MacOS/ZDStompHost
+          lipo -info bin/ZDStompHost.component/Contents/MacOS/ZDStompHost
+
+      - name: Package macOS plugins
+        run: |
+          mkdir -p dist
+          cp -R bin/ZDStompHost.vst3 dist/
+          cp -R bin/ZDStompHost.component dist/
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZDStompHost-macOS-Universal-VST3-AU
+          path: |
+            dist/ZDStompHost.vst3
+            dist/ZDStompHost.component
+          if-no-files-found: error

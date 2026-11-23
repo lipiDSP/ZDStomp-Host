@@ -2,8 +2,12 @@
 #define DISTRHO_PLUGIN_INFO_H_INCLUDED
 
 #define DISTRHO_PLUGIN_BRAND           "Zoom Emulator Project"
-#define DISTRHO_PLUGIN_NAME "ZD Stomp Host"
-#define DISTRHO_PLUGIN_URI "https://github.com/user/ZDStompHost"
+#define DISTRHO_PLUGIN_NAME            "ZD Stomp Host"
+#define DISTRHO_PLUGIN_URI             "https://github.com/user/ZDStompHost"
+#define DISTRHO_PLUGIN_CLAP_ID         "com.zoomemulatorproject.zdstomphost"
+#define DISTRHO_PLUGIN_BRAND_ID        ZmEp
+#define DISTRHO_PLUGIN_UNIQUE_ID       ZMSR
+#define DPF_VST3_DONT_USE_BRAND_ID
 
 #define DISTRHO_PLUGIN_HAS_UI          1
 #define DISTRHO_PLUGIN_IS_RT_SAFE      1

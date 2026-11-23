@@ -11,6 +11,9 @@ build/
 *.vst3
 *.lv2
 *.clap
+*.component
+*.vst
+*.app
 
 # OS és IDE specifikus fájlok
 .DS_Store

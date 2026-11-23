@@ -11,10 +11,13 @@
 #include <fstream>
 #include <sstream>
 #include <dirent.h>
+#include <cstdlib>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <shlobj.h>
+#else
+#include <sys/stat.h>
 #endif
 
 START_NAMESPACE_DISTRHO
@@ -95,9 +98,20 @@ public:
         fParamValues[kParamLastMidiCC]  = 0.0f;
         fParamValues[kParamMidiMonitor] = 0.0f;
 
+#ifdef _WIN32
         fFontId = createFontFromFile("sans", "C:\\Windows\\Fonts\\consola.ttf");
         if (fFontId < 0) fFontId = createFontFromFile("sans", "C:\\Windows\\Fonts\\arial.ttf");
         if (fFontId < 0) fFontId = createFontFromFile("sans", "C:\\Windows\\Fonts\\segoeui.ttf");
+#elif defined(__APPLE__)
+        fFontId = createFontFromFile("sans", "/System/Library/Fonts/Supplemental/Arial.ttf");
+        if (fFontId < 0) fFontId = createFontFromFile("sans", "/System/Library/Fonts/Menlo.ttc");
+        if (fFontId < 0) fFontId = createFontFromFile("sans", "/System/Library/Fonts/Helvetica.ttc");
+        if (fFontId < 0) fFontId = createFontFromFile("sans", "/System/Library/Fonts/SFNS.ttf");
+#else
+        fFontId = createFontFromFile("sans", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
+        if (fFontId < 0) fFontId = createFontFromFile("sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+        if (fFontId < 0) fFontId = createFontFromFile("sans", "/usr/share/fonts/TTF/DejaVuSans.ttf");
+#endif
     }
 
 protected:
@@ -853,7 +867,16 @@ private:
         setParameterValue(index, value);
         editParameter(index, false);
     }
+    static bool pathExists(const std::string& p) {
+#ifdef _WIN32
+        return GetFileAttributesA(p.c_str()) != INVALID_FILE_ATTRIBUTES;
+#else
+        struct stat st;
+        return stat(p.c_str(), &st) == 0;
+#endif
+    }
     static std::string getPresetDirectory() {
+#ifdef _WIN32
         DWORD a = GetFileAttributesA("H:/Programok/ZoomMultiStompVST/Presets");
         if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) return "H:/Programok/ZoomMultiStompVST/Presets";
         const char* up = std::getenv("USERPROFILE");
@@ -861,16 +884,24 @@ private:
         CreateDirectoryA(d.c_str(), nullptr);
         std::string p = d + "/Presets"; CreateDirectoryA(p.c_str(), nullptr);
         return p;
+#else
+        const char* home = std::getenv("HOME");
+        std::string d = home ? (std::string(home) + "/Documents/ZDStompHost") : ".";
+        mkdir(d.c_str(), 0755);
+        std::string p = d + "/Presets";
+        mkdir(p.c_str(), 0755);
+        return p;
+#endif
     }
     static std::string resolvePortablePath(const std::string& orig, const std::string& rigFile) {
         if (orig.empty() || orig == "EMPTY") return "";
-        if (GetFileAttributesA(orig.c_str()) != INVALID_FILE_ATTRIBUTES) return orig;
+        if (pathExists(orig)) return orig;
         std::string fn = extractFilename(orig);
         size_t sl = rigFile.find_last_of("/\\");
         std::string rDir = (sl == std::string::npos) ? "." : rigFile.substr(0, sl);
         std::string pDir = getPresetDirectory();
         const std::string cands[6] = { rDir + "/" + fn, rDir + "/Effects/" + fn, rDir + "/IRs/" + fn, pDir + "/" + fn, pDir + "/../Effects/" + fn, pDir + "/../IRs/" + fn };
-        for (int i = 0; i < 6; ++i) if (GetFileAttributesA(cands[i].c_str()) != INVALID_FILE_ATTRIBUTES) return cands[i];
+        for (int i = 0; i < 6; ++i) if (pathExists(cands[i])) return cands[i];
         return orig;
     }
     void stepPreset(int dir) {
@@ -879,10 +910,26 @@ private:
         size_t sl = path.find_last_of("/\\");
         std::string d = (sl == std::string::npos) ? getPresetDirectory() : path.substr(0, sl);
         std::vector<std::string> files;
+        auto toLowerStr = [](const std::string& s) { std::string r = s; for (char& c : r) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); return r; };
+#ifdef _WIN32
         WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA((d + "/*.zrig").c_str(), &fd);
         if (h != INVALID_HANDLE_VALUE) { do { if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) files.push_back(fd.cFileName); } while (FindNextFileA(h, &fd)); FindClose(h); }
+#else
+        if (DIR* dirp = opendir(d.c_str())) {
+            while (struct dirent* ent = readdir(dirp)) {
+                std::string name(ent->d_name);
+                if (name.size() >= 5 && toLowerStr(name.substr(name.size() - 5)) == ".zrig") {
+                    struct stat st;
+                    std::string full = d + "/" + name;
+                    if (stat(full.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+                        files.push_back(name);
+                    }
+                }
+            }
+            closedir(dirp);
+        }
+#endif
         if (files.empty()) return;
-        auto toLowerStr = [](const std::string& s) { std::string r = s; for (char& c : r) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); return r; };
         std::sort(files.begin(), files.end(), [&](const std::string& a, const std::string& b) { return toLowerStr(a) < toLowerStr(b); });
         int cur = -1;
         std::string curLower = toLowerStr(extractFilename(path));
